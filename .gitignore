@@ -2,5 +2,8 @@
 .ipynb_checkpoints/
 
 # Ignore Python virtual environment directories
+*/venv/
 venv/
 env/
+.jar
+.tar.gz
