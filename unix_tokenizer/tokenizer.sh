@@ -11,7 +11,7 @@
 # -c option negates regex pattern
 # -s option squeezes consecutive changes into one change
 # sort -n -r organize by count highest-to-lowest
-# uniq -c to collapse duplicate tokens and count
+# uniq -c to collapse duplicate TOKENS and count
 
 if [ -f "data.txt" ]; then
     echo "data file found"
@@ -21,7 +21,7 @@ else
     DATA_FILE="data.txt"
 fi
 
-tr -sc "A-Za-z" "\n" < $DATA_FILE | tr "A-Z" "a-z" | sort | uniq -c | sort -n -r > output.txt
+tr -sc "^A-Za-z" "\n" < $DATA_FILE | tr "A-Z" "a-z" | sort | uniq -c | sort -n -r > output.txt
 
 rm data.txt
 
