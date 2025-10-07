@@ -206,6 +206,8 @@ ToolCommander is evaluated by injecting Manipulator Tools into a realistic tool-
 - Confirms success of adversarial suffix + MCG optimization.
 > “Manipulator Tool achieves high ASRPT ... 91.67%, indicating they are highly effective at capturing user queries.”
 
+![Stage 1 Results](./assets/stage1_results.png)
+
 ---
 
 ## Stage 2: DoS & Unscheduled Tool Calling
@@ -214,6 +216,8 @@ ToolCommander is evaluated by injecting Manipulator Tools into a realistic tool-
   - **DoS and UTC success → up to 100%**
   - Attack scales with real-world query data.
 - Shows **feedback loop** between privacy theft and system disruption.
+
+![Stage 2 Results](./assets/stage2_results.png)
 
 ---
 
@@ -245,3 +249,11 @@ ToolCommander is evaluated by injecting Manipulator Tools into a realistic tool-
 - Adversarial retriever manipulation works even under restricted access.
 - MCG optimization effective.
 - Defenses must address both retrieval and execution layers.
+
+---
+
+## Further Questions
+
+1. What is a commercial solution to mitigate malicious tools within a marketplace / repository?
+2. What other potential attack surfaces exist within a tool-calling LLM, e.g. API keys?
+3. Are there any commercial white-box offerings that remain vulnerable, e.g. Ollama ecosystem?
