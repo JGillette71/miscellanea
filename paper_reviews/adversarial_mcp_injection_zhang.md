@@ -224,7 +224,7 @@ ToolCommander is evaluated by injecting Manipulator Tools into a realistic tool-
 ## Baseline Comparison
 
 | Method | Retrieval | Execution | Efficiency |
-|---------|------------|------------|-------------|
+|---------|------------|------------|-------------|git
 | **ToolCommander** | Slightly lower | **Much higher** | **Best (64 steps)** |
 | PoisonedRAG | Higher retrieval | Lower execution | Moderate |
 | HotFlip | Lowest | Lowest | Worst |
