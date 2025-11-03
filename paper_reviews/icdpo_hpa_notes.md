@@ -99,3 +99,222 @@ After algebraic manipulation we arrive at the following final **DPO Loss Functio
 
 Once the loss function is calculated per batch, the policy model is updated through standard back propagation, effectively embedding the reward instead of using two separate models.
 
+```mermaid
+flowchart TD
+  X[Preference data with prompt, preferred, and dispreferred responses]
+  REF[Reference model]
+  POL[Policy model]
+
+  subgraph S[Preference Likelihoods]
+    L1[Calculate likelihood of preferred and dispreferred responses under the policy model]
+    L2[Calculate likelihood of the same responses under the reference model]
+    DLT[Compare how much more the policy favors the preferred response relative to the reference]
+    OBJ[Apply logistic function to produce preference score]
+  end
+
+  subgraph O[Optimization loop]
+    G[Backpropagate preference loss]
+    U[Update model parameters]
+  end
+
+  X --> L1
+  POL --> L1
+  REF --> L2
+  X --> L2
+  L1 --> DLT
+  L2 --> DLT
+  DLT --> OBJ --> G --> U
+```
+
+### In-Context Learning (ICL) Fundamentals
+
+In-Context Learning is the ability of large language models to learn a behavior from examples provided in the prompt itself, without updating their parameters.
+For instance:
+
+```plainttext
+Prompt: Translate English to French:
+cat - chat
+dog - chien
+tree - arbre
+house -
+```
+
+```
+Output
+“maison”
+```
+
+The model effectively learned a translation rule in context. It’s not performing gradient updates; it’s exploiting the statistical structure of the examples and its prior training to infer the mapping. In HPA, we can guide an LLM toward desired behaviors without retraining it; just by prompt design.
+
+## Instantly Learning Preference Alignment via In-context DPO
+
+This paper introduces **In-Context Direct Preference Optimization (ICDPO)**, which combines in-context learning with DPO principles to achieve alignment **without fine-tuning**.
+
+### Core Ideas
+
+#### Motivations
+
+The authors ask *"Can we perform DPO-like optimization without training, by just conditioning the base model appropriately?"* Direct Preference Optimization (DPO) is already a simplification of RLHF that removes the need for reinforcement learning by directly optimizing for preference, but it still requires fine-tuning, which leaves the following drawbacks.
+
+- Parameter updates / training cost
+- Storage of fine-tuned models / checkpoints
+- Possible over-fitting to small preference datasets.
+
+ICDPO replicates the logic of DPO inside a prompt, letting the base model reason as if it were DPO-trained.
+
+#### High Level Methods
+
+ICDPO has two conceptual layers.
+
+1. The retriever - Given a new query *x*, the system retrieves a few demonstrations, i.e., previously seen examples of prompts, good responses, and their comparisons that act as in-context training / preference data.
+2. The contrastive inference - The model sees the demonstrations and two candidate responses `y+(preferred) and y−(dispreferred)`. It uses its own internal scoring (via log probabilities) to decide which one aligns better with the expert pattern represented in the retrieved context.
+
+#### Contrastive Inference vs. DPO
+
+ICDPO replaces training-time ratios (KL Regularization) with in-context ratios, computed over the model’s log-probabilities given demonstrations. In other words, the model generations of tokens is conditioned on demonstrations in-context.
+
+We call this in-context ratio the **expert score**, `S(x,y)=log π(y∣x,D_context​)` allowing the model to map the relationships between positive demonstrations (preferred) versus negative demonstrations, `S(x,y+)−S(x,y−)`.
+
+#### Expert Amateur Collaboration Intro
+
+The authors describe ICDPO as an expert–amateur dynamic where the expert is a simulated DPO-tuned model instantiated with demonstrations in-context while the amateur is the base model responding to the query with no demonstrations in-context. The model collaborates between where ICDPO turns a prompt into a pseudo fine-tuning session.
+
+### Expert–Amateur Collaboration and Scoring
+
+The **amateur** is the base model: it can answer any prompt, but it hasn’t been fine-tuned for alignment.
+
+The **expert** is a simulated DPO-trained model, not a separate network, but a persona created in-context by providing preference demonstrations.
+
+When the model receives a query, it behaves as if the expert (represented by retrieved demonstrations) is supervising its reasoning, while the amateur produces candidate answers.
+
+#### Scoring
+
+1. Expert score `S(x,y)` - The log-probability of response *y* when the model is conditioned on expert demonstrations (the retrieved context).
+2. Amateur score `S^(x,y)` - The log-probability of the same response when no demonstrations are provided (the bare model).
+
+These two are compared for a given pair of responses `(y+,y−)`. If the expert-context raises the likelihood of *y+* more than *y−*, the model infers that *y+* aligns better with the expert preference pattern. Thus, alignment is enacted as a contrast between conditioned and unconditioned likelihoods.
+
+#### Collaboration (contrastive) Signal
+
+The “expert guidance” is the improvement that the expert context provides, `Δ(x,y)=S(x,y)−S^(x,y)`. This difference quantifies how much the context made the model favor this response.
+
+Then for a preferred vs dis-preferred pair, the final comparison is `D(x)=Δ(x,y+)−Δ(x,y−)`.
+
+#### Technical Implementation
+
+```mermaid
+flowchart LR
+  %% Inputs
+  X[User Query x]
+  D[Human Preference Dataset]
+
+  %% Retriever
+  subgraph R[Retriever R]
+    R1[BM25: lexical search]
+    R2[SBERT: semantic rerank]
+  end
+
+  %% Prompt
+  P[Build prompt with top-k demonstrations]
+
+  %% LLM Scoring
+  subgraph S[LLM Scoring]
+    S1[Expert score S: with context]
+    S2[Amateur score S^: without context]
+    C[Compute Δ = S − S^ and preference D]
+  end
+
+  %% Output
+  O1[Select higher scoring response y_plus or rerank candidates]
+  O2[Optionally return scores S, S_hat, Delta, D for transparency]
+
+  %% Flow
+  X --> P
+  D --> R1
+  R1 --> R2 --> P --> S
+  X --> S
+  S --> O1
+  S --> O2
+```
+
+1. Retrieval Mechanism
+
+    ```plaintext
+    for each input X do;
+        get N candidate demonstrations # BM25
+        semantic rank demonstrations # SBERT
+        return top-k demonstrations
+    ```
+
+2. Prompt Construction
+
+    ```plaintext
+    # Demonstration 1
+    Prompt: Explain why exercise is important.
+    Preferred: It improves health and mood.
+    Dispreferred: Exercise is boring.
+
+    # Demonstration 2
+    Prompt: Describe a cat.
+    Preferred: A small, playful animal often kept as a pet.
+    Dispreferred: Cats are annoying.
+
+    # New Query
+    Prompt: What are benefits of reading books?
+    Candidate Response: # y
+    ```
+
+3. Scoring (condition -> score -> compare -> choose)
+
+- Compute Expert Score `S(x,y)` via `log π(y∣x,D_expert​)`, i.e., summing log_softmax token probabilities for all tokens in *y*.
+- Compute Amateur score `S^(x,y)` passing only *Prompt: x* to generate candidate Response *y*, and compute log-probability `log π(y∣x,D_expert​)`.
+- Contrastive step subtracts `Δ(x,y)=S−S^` then evaluates preference difference *D(x)*. This process is **inference only**, no back-propagation, no parameter update. It just reads token likelihoods from the model’s forward pass.
+- Decide or weigh responses, select the higher-scoring response (alignment filter), or weight candidate responses by *D(x)* for re-ranking or generation.
+
+### Two-stage retriever *R* (BM25 to SBERT)
+
+ICDPO’s alignment quality depends entirely on the demonstrations placed in context. Retriever *R* selects those examples from the preference dataset so that the model sees relevant, high-quality expert behavior for each new query *x*.
+
+1. **BM25** Lexical Filtering - Uses classic term-frequency / inverse document frequency (TF-IDF) scoring to quickly narrow thousands of demonstrations to a small subset that share keywords with the new prompt. This enables fast and cheap retrieval and may miss semantic matches but it guarantees topical overlap.
+
+2. **SBERT** Semantic Re-ranking - Encodes both the query *x* and each BM25-retrieved demonstration into sentence embeddings using a Sentence-BERT model. It then computes cosine similarity between embeddings and promote demos that are semantically similar, not just lexically similar. It then returns top-k demonstrations with the highest similarity scores.
+
+This hybrid design gives speed with BM25 and accuracy with SBERT while avoiding the cost of embedding the entire corpus each time.
+
+### Experiments and Empirical Findings for ICDPO vs DPO
+
+#### Experiment Set-up
+
+Datasets (human preference datasets):
+
+- Anthropic Helpful–Harmless (HH-RLHF)
+- OpenAssistant (OASST)
+
+Models:
+
+- LLama-2
+- GPT-J
+
+Baselines:
+
+- Supervised Fine-tuning (SFT)
+- Traditional Direct Preference Optimization (DPO)
+- In-context Direct Preference Optimization (ICDPO)
+
+Evaluation Metrics:
+
+- pairwise preference accuracy — the percentage of times the method correctly ranks the preferred response higher than the dis-preferred one.
+
+#### Results
+
+- HH-RLHF ~67% DPO, ~65–66% ICDOP, almost identical accuracy.
+- OASST ~70% DPO ~69–71% ICDPO, on par or slightly higher.
+- SFT generally worse performing with ~58-60%.
+
+Overall cost savings are orders of magnitude, since ICDPO only runs inference.
+
+#### Ablation Findings
+
+- Removing the SBERT re-ranker drops performance notably, indicating semantic retrieval is crucial.
+- Using random demonstrations collapses results to near-SFT levels, demonstrating relevance of context is key.
+- Increasing demo count beyond ~5 gives diminishing returns showing a optimal few-shot window exists.
