@@ -318,3 +318,7 @@ Overall cost savings are orders of magnitude, since ICDPO only runs inference.
 - Removing the SBERT re-ranker drops performance notably, indicating semantic retrieval is crucial.
 - Using random demonstrations collapses results to near-SFT levels, demonstrating relevance of context is key.
 - Increasing demo count beyond ~5 gives diminishing returns showing a optimal few-shot window exists.
+
+## References
+
+* [Instantly Learning Preference Alignment via In-context DPO](https://aclanthology.org/2025.naacl-long.8/) (Song et al., NAACL 2025)
