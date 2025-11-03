@@ -411,3 +411,5 @@ ICDPO + *S^* consistently wins across all base models and benchmarks — especia
 ## References
 
 * [Instantly Learning Preference Alignment via In-context DPO](https://aclanthology.org/2025.naacl-long.8/) (Song et al., NAACL 2025)
+
+* [Instantly Learning Preference Alignment via In-context DPO](https://aclanthology.org/2025.naacl-long.8/) (Song et al., NAACL 2025)
