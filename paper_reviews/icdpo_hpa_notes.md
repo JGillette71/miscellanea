@@ -285,33 +285,122 @@ This hybrid design gives speed with BM25 and accuracy with SBERT while avoiding 
 
 #### Experiment Set-up
 
-Datasets (human preference datasets):
+**Datasets (human preference datasets):**
 
-- Anthropic Helpful–Harmless (HH-RLHF)
-- OpenAssistant (OASST)
+1. **HH-RLHF (Anthropic Helpful–Harmless)**
+    - Human-labeled comparisons of helpful vs. harmless responses.
+    - Used to test how well models align with *safety* and *helpfulness* goals.
+    - Evaluated both by a learned reward model (RM) and GPT-4 as a judge.
+
+2. **AlpacaEval (Li et al., 2023b)**
+    - GPT-4–based benchmark for *instruction-following* ability.
+    - Uses automatic pairwise comparisons (win/tie/lose) between model outputs and reference answers.
+    - Includes length-bias correction so longer answers aren’t unfairly rewarded.
+
+---
 
 Models:
 
-- LLama-2
-- GPT-J
+- **LLaMA-7B, LLaMA-2-7B, Mistral-7B-v0.1**
+- Representative open-weight models with different base capabilities.
+- Serve as frozen backbones for testing how well ICDPO generalizes across architectures.
 
-Baselines:
+---
 
-- Supervised Fine-tuning (SFT)
-- Traditional Direct Preference Optimization (DPO)
-- In-context Direct Preference Optimization (ICDPO)
+Baselines (tuning-free or prompt-based methods):
 
-Evaluation Metrics:
+- **Zero-Shot** — base model responses with no alignment or context.
+- **RM-BoN (Best-of-N)** — generates several completions and picks the one with the *highest reward model score*.
+- **RM-Aug** — incorporates reward signals during decoding (biases token probabilities using the reward model).
+- **URIAL** — prompt-based ICL alignment; uses retrieved examples of good behavior as in-context demonstrations.
+- **RAIN** — self-evaluative prompting; the model critiques and refines its own responses (no external retriever).
 
-- pairwise preference accuracy — the percentage of times the method correctly ranks the preferred response higher than the dis-preferred one.
+➡ These baselines **do not modify model weights** — they rely solely on *prompt-level* or *decoding-level* adaptation.
+
+---
+
+Fine-tuning baselines (trainable methods):
+
+- **SFT (Supervised Fine-tuning)** — standard supervised training on preferred responses.
+- **DPO (Direct Preference Optimization)** — fine-tunes using preference pairs without a reward model.
+- **ICDPO (In-context DPO)** — proposed *tuning-free* variant; simulates DPO via in-context examples and log-prob comparisons.
+
+➡ These involve (SFT, DPO) *updating parameters* except ICDPO, which is *inference-only.*
+
+---
+
+**Evaluation Metrics:**
+- **RMtest score**
+  - Score assigned by a trained reward model.
+  - Measures how “aligned” or “human-preferred” outputs are.
+  - Higher = better alignment quality.
+- **GPT-4 Win/Tie/Lose rate**
+  - GPT-4 acts as a human judge comparing model vs. reference answers.
+  - Tests *perceived helpfulness and correctness*.
+- **Length-Controlled Win Rate (AlpacaEval)**
+  - Removes length bias in GPT-4 judging.
+  - Tests instruction-following ability more objectively.
+- **Mean Reciprocal Rank (MRR)**
+  - Correlates ICDPO preference scores with GPT-4 ranking.
+  - Measures *consistency* between ICDPO’s internal scoring and external evaluation.
+
+---
 
 #### Results
 
-- HH-RLHF ~67% DPO, ~65–66% ICDOP, almost identical accuracy.
-- OASST ~70% DPO ~69–71% ICDPO, on par or slightly higher.
-- SFT generally worse performing with ~58-60%.
+##### RM Evaluations
 
-Overall cost savings are orders of magnitude, since ICDPO only runs inference.
+(*Quantitative comparison of alignment scores via reward model.*)
+
+| Method                               | LLaMA  | LLaMA-2 | Mistral |
+| ------------------------------------ | ------ | ------- | ------- |
+| Zero-Shot                            | −36.54 | −30.72  | −11.82  |
+| RM-BoN                               | −31.04 | −22.82  | 0.52    |
+| RM-Aug                               | −27.66 | −24.61  | 3.32    |
+| **ICDPO**                            | 25.56  | 62.27   | 68.81   |
+| **ICDPO + Ŝ**                        | 28.48  | 63.69   | 71.16   |
+| **ICDPO + ŜR (two-stage retriever)** | 51.56  | 69.66   | 73.59   |
+
+💡 *ICDPO and its variants outperform RM-based and prompt baselines by large margins, matching fine-tuned DPO accuracy.*
+
+---
+
+##### GPT-4 Evaluations
+
+(*External human-like judgment via GPT-4 on 200 HH-RLHF samples.*)
+
+- ICDPO variants consistently achieve higher combined **win + tie** rates.
+- Validates that ICDPO’s internal scoring aligns with human-like preference judgments.
+- *Helpful* subset harder (open-ended reasoning) than *Harmless* subset (safety adherence).
+
+---
+
+##### AlpacaEval Results
+
+(*Automatic GPT-4 comparison on instruction-following tasks.*)
+
+| Base    | RM-BoN | RM-Aug | URIAL | RAIN  | **ICDPO**         | **ICDPO + Ŝ**     |
+| ------- | ------ | ------ | ----- | ----- | ----------------- | ----------------- |
+| LLaMA   | 1.58   | 2.29   | 5.38  | 6.81  | **10.00 (+3.19)** | **10.26 (+3.45)** |
+| LLaMA-2 | 6.31   | 6.20   | 6.95  | 16.27 | **18.66 (+2.39)** | **19.24 (+2.97)** |
+| Mistral | 17.14  | 18.51  | 21.90 | 26.32 | **26.53 (+0.21)** | **28.30 (+1.98)** |
+
+ICDPO + *S^* consistently wins across all base models and benchmarks — especially strong gains on weaker backbones like LLaMA.
+
+- Baselines rely on reward models or prompt tricks; **ICDPO** achieves alignment without either.
+- Fine-tuning baselines modify model weights; ICDPO mimics fine-tuning effects dynamically.
+- Evaluations progressively measure: internal reward alignment → GPT-4 human-likeness → task generalization.
+- Across all, **ICDPO + two-stage retriever (S^, R)** delivers the highest or near-highest alignment with minimal compute cost.
+
+##### Fine-tuning Comparisons
+
+| Method              | LLaMA     | LLaMA-2   | Mistral   |
+| ------------------- | --------- | --------- | --------- |
+| SFT                 | 34.73     | 57.59     | 63.43     |
+| DPO                 | 43.02     | 68.34     | 69.26     |
+| CPO-SimPO           | 45.80     | 58.41     | 73.07     |
+| **ICDPO (2 demos)** | 25.56     | 62.27     | 68.81     |
+| **ICDPO + ŜR**      | **51.56** | **69.66** | **73.59** |
 
 #### Ablation Findings
 
